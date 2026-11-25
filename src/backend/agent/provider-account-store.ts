@@ -26,22 +26,24 @@ const POOL_ACCOUNT_ID = /^(?:default|a[0-9a-f]{16})$/u;
 const Provider = Schema.Literals(AGENT_PROVIDERS.filter((provider) => provider !== "acp"));
 const LabelText = Schema.String.check(Schema.isMaxLength(PROVIDER_ACCOUNT_LABEL_MAX_LENGTH));
 const Label = Schema.NullOr(LabelText);
+const Pools = Schema.optionalKey(
+  Schema.Record(
+    Schema.String,
+    Schema.Struct({
+      leftOut: Schema.Array(Schema.String.check(Schema.isPattern(POOL_ACCOUNT_ID))).check(
+        Schema.isMaxLength(MAX_PROVIDER_ACCOUNTS),
+      ),
+    }),
+  ),
+);
 const ProviderAccountsFile = Schema.Struct({
   version: Schema.Literal(1),
   accounts: Schema.Array(
     Schema.Struct({ id: Schema.String.check(Schema.isPattern(ACCOUNT_ID)), provider: Provider, label: Label }),
   ),
   defaultLabels: Schema.Record(Schema.String, LabelText),
-  pools: Schema.optionalKey(
-    Schema.Record(
-      Schema.String,
-      Schema.Struct({
-        leftOut: Schema.Array(Schema.String.check(Schema.isPattern(POOL_ACCOUNT_ID))).check(
-          Schema.isMaxLength(MAX_PROVIDER_ACCOUNTS),
-        ),
-      }),
-    ),
-  ),
+  pools: Pools,
+  offPools: Pools,
   liveVoiceAccount: Schema.optionalKey(Schema.String.check(Schema.isPattern(POOL_ACCOUNT_ID))),
 });
 type ProviderAccountsFile = typeof ProviderAccountsFile.Type;
@@ -105,9 +107,19 @@ export class ProviderAccountStore {
     pool: { leftOut: readonly string[] } | null,
   ) {
     return yield* this.#change((file) => {
-      const { [provider]: _previous, ...pools } = file.pools ?? {};
+      const { [provider]: on, ...pools } = file.pools ?? {};
+      const { [provider]: off, ...offPools } = file.offPools ?? {};
+      if (!pool) {
+        const kept = on ?? off;
+        return Effect.succeed({
+          file: { ...file, pools, offPools: kept?.leftOut.length ? { ...offPools, [provider]: kept } : offPools },
+          result: undefined,
+        });
+      }
+      const turnsOnWithNoList = !on && pool.leftOut.length === 0;
+      const leftOut = turnsOnWithNoList ? (off?.leftOut ?? []) : pool.leftOut;
       return Effect.succeed({
-        file: { ...file, pools: pool ? { ...pools, [provider]: { leftOut: [...new Set(pool.leftOut)] } } : pools },
+        file: { ...file, pools: { ...pools, [provider]: { leftOut: [...new Set(leftOut)] } }, offPools },
         result: undefined,
       });
     });
@@ -214,6 +226,7 @@ export class ProviderAccountStore {
           ...rest,
           accounts: file.accounts.filter((candidate) => candidate.id !== account.id),
           ...(file.pools ? { pools: withoutPoolAccount(file.pools, account.id) } : {}),
+          ...(file.offPools ? { offPools: withoutPoolAccount(file.offPools, account.id) } : {}),
           ...(liveVoiceAccount && liveVoiceAccount !== account.id ? { liveVoiceAccount } : {}),
         },
         result: undefined,
