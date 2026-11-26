@@ -47,9 +47,6 @@ final class WidgetDriver: XCTestCase {
     try addWidget()
     leaveEditMode()
     snap("done")
-    let onHome = springboard.descendants(matching: .any)
-      .matching(NSPredicate(format: "label CONTAINS[c] %@", search)).allElementsBoundByIndex
-    log("home screen elements naming \(search): \(onHome.map { "'\($0.label)' value '\($0.value ?? "")' \($0.frame)" })")
   }
 
   // MARK: Steps
