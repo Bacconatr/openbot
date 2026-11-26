@@ -5,9 +5,11 @@ import XCTest
 /// xcodebuild passes `TEST_RUNNER_<NAME>` from its environment to the test as `<NAME>`:
 /// - `WIDGET_SEARCH`: text typed into the widget gallery search, such as the app name.
 /// - `WIDGET_SIZE`: `small`, `medium` or `large`.
-/// - `WIDGET_PAGE`: optional gallery page to add (0-based). Without it the driver reads the size of
-///   each page's preview and stops at the first page of `WIDGET_SIZE`.
 /// - `LAB_OUT_DIR`, `LAB_LABEL`: host folder and file prefix for step screenshots, trees and the log.
+///
+/// Measured on iOS 27.2: long-press an icon, Edit Home Screen, Edit, Add Widget, search, tap the
+/// app's row. Its sheet pages sideways through previews whose accessibility value names the size
+/// ("Widget, Small"), above a " Add Widget" button whose label starts with an icon character.
 final class WidgetDriver: XCTestCase {
   enum Size: String {
     case small, medium, large
@@ -28,9 +30,7 @@ final class WidgetDriver: XCTestCase {
     if let dir = env["LAB_OUT_DIR"], !dir.isEmpty { outDir = URL(fileURLWithPath: dir) }
     if let value = env["LAB_LABEL"], !value.isEmpty { label = value }
     try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
-    log(
-      "WIDGET_SEARCH=\(env["WIDGET_SEARCH"] ?? "-") WIDGET_SIZE=\(env["WIDGET_SIZE"] ?? "-") "
-        + "WIDGET_PAGE=\(env["WIDGET_PAGE"] ?? "-") screen=\(springboard.frame)")
+    log("WIDGET_SEARCH=\(env["WIDGET_SEARCH"] ?? "-") WIDGET_SIZE=\(env["WIDGET_SIZE"] ?? "-") screen=\(springboard.frame)")
   }
 
   func testAddWidget() throws {
@@ -38,18 +38,18 @@ final class WidgetDriver: XCTestCase {
     guard let size = Size(rawValue: env["WIDGET_SIZE"] ?? "") else {
       throw failure("WIDGET_SIZE must be small, medium or large")
     }
-    let forcedPage = env["WIDGET_PAGE"].flatMap { Int($0) }
     goHome()
     snap("home")
     try enterEditMode()
     try openGallery()
     try openApp(named: search)
-    try showPage(for: size, forcedPage: forcedPage)
+    try showPreview(of: size)
     try addWidget()
     leaveEditMode()
     snap("done")
-    let onHome = elements().filter { $0.label.localizedCaseInsensitiveContains(search) }
-    log("home screen elements naming \(search): \(onHome.map(describe))")
+    let onHome = springboard.descendants(matching: .any)
+      .matching(NSPredicate(format: "label CONTAINS[c] %@", search)).allElementsBoundByIndex
+    log("home screen elements naming \(search): \(onHome.map { "'\($0.label)' value '\($0.value ?? "")' \($0.frame)" })")
   }
 
   // MARK: Steps
@@ -103,7 +103,7 @@ final class WidgetDriver: XCTestCase {
     }
     sleep(1)
     snap("gallery")
-    log("gallery apps on screen: \(elements().filter { $0.elementType == .cell }.map(\.label))")
+    log("gallery apps: \(springboard.cells.allElementsBoundByIndex.map(\.label))")
   }
 
   private func openApp(named name: String) throws {
@@ -116,7 +116,6 @@ final class WidgetDriver: XCTestCase {
     let fieldBottom = field.frame.maxY
     let keyboard = springboard.keyboards.firstMatch
     let keyboardFrame = keyboard.exists ? keyboard.frame : CGRect.null
-    log("after the search, cells \(elements().filter { $0.elementType == .cell }.map(describe)); field bottom \(fieldBottom); keyboard \(keyboardFrame)")
     // A result row: a cell or text labeled with the name, below the field and above the keyboard.
     let named = NSPredicate(format: "label ==[c] %@ OR label BEGINSWITH[c] %@", name, name + ",")
     var hit: XCUIElement?
@@ -124,7 +123,6 @@ final class WidgetDriver: XCTestCase {
       for query in [springboard.cells, springboard.staticTexts, springboard.buttons] {
         for item in query.matching(named).allElementsBoundByIndex {
           let frame = item.frame
-          log("result candidate \(item.elementType.rawValue) '\(item.label)' \(frame) hittable \(item.isHittable)")
           if frame.minY >= fieldBottom && !frame.intersects(keyboardFrame) && item.isHittable {
             hit = item
             return true
@@ -134,39 +132,42 @@ final class WidgetDriver: XCTestCase {
       return false
     }
     guard let hit else { throw failure("the gallery search found nothing named \(name)") }
+    log("tapping result '\(hit.label)' \(hit.frame)")
     hit.tap()
-    guard control("Add Widget", timeout: 8) != nil else {
+    guard addWidgetButton().waitForExistence(timeout: 8) else {
       throw failure("tapping the \(name) result did not open its widgets")
     }
     sleep(1)
   }
 
-  private func showPage(for size: Size, forcedPage: Int?) throws {
-    var previous: String?
-    for page in 0..<10 {
-      let all = elements()
-      let preview = currentPreview(in: all)
-      let family = preview.map(classify)
-      let indicator = all.first { $0.elementType == .pageIndicator }
-      let signature = "\(preview.map(describe) ?? "-") \(indicator.map(describe) ?? "-")"
-      log("gallery page \(page): family \(family?.rawValue ?? "unknown"); preview \(preview.map(describe) ?? "none"); indicator \(indicator.map(describe) ?? "none")")
+  /// Pages through the app's previews until the one in view has the size.
+  private func showPreview(of size: Size) throws {
+    let screen = springboard.frame
+    for page in 0..<12 {
+      let previews = springboard.buttons.matching(NSPredicate(format: "value BEGINSWITH[c] 'Widget'"))
+        .allElementsBoundByIndex
+      let inView = previews.first { $0.frame.minX >= 0 && $0.frame.maxX <= screen.width && $0.frame.width > 0 }
+      let value = inView.map { "\($0.value ?? "")" } ?? ""
+      log("gallery page \(page): in view '\(inView?.label ?? "-")' value '\(value)' frame \(inView?.frame ?? .null); all \(previews.map { "\($0.value ?? "")" })")
       snap("page-\(page)")
-      if let forcedPage {
-        if page == forcedPage { return }
-      } else if family == size {
-        return
-      }
-      if signature == previous { throw failure("the gallery stopped at page \(page) without a \(size.rawValue) widget") }
-      previous = signature
-      swipeToNextPage(at: preview?.frame)
+      guard let inView else { throw failure("no widget preview in view on gallery page \(page)") }
+      if value.range(of: size.rawValue, options: .caseInsensitive) != nil { return }
+      let y = inView.frame.midY
+      let origin = springboard.coordinate(withNormalizedOffset: .zero)
+      origin.withOffset(CGVector(dx: screen.width * 0.85, dy: y))
+        .press(
+          forDuration: 0.01, thenDragTo: origin.withOffset(CGVector(dx: screen.width * 0.15, dy: y)),
+          withVelocity: .fast, thenHoldForDuration: 0)
+      sleep(1)
     }
-    throw failure("no \(size.rawValue) widget in the first 10 gallery pages")
+    throw failure("no \(size.rawValue) widget in the first 12 gallery pages")
   }
 
   private func addWidget() throws {
-    guard let add = control("Add Widget", timeout: 3) else { throw failure("the Add Widget button is gone") }
+    let add = addWidgetButton()
+    guard add.waitForExistence(timeout: 3) else { throw failure("the Add Widget button is gone") }
     add.tap()
-    guard waitUntil(8, { !self.springboard.searchFields.firstMatch.exists }) else {
+    guard waitUntil(8, { !self.addWidgetButton().exists }) else {
       throw failure("the gallery did not close after Add Widget")
     }
     sleep(2)
@@ -187,59 +188,11 @@ final class WidgetDriver: XCTestCase {
     }
   }
 
-  // MARK: Gallery pages
-
-  /// The largest element that fits on screen and has a widget's proportions: the visible preview.
-  private func currentPreview(in all: [XCUIElementSnapshot]) -> XCUIElementSnapshot? {
-    let screen = springboard.frame
-    let add = all.first { $0.elementType == .button && $0.label == "Add Widget" }?.frame
-    return all
-      .filter { item in
-        let frame = item.frame
-        return frame.minX >= 1 && frame.maxX <= screen.width - 1
-          && frame.width >= 0.3 * screen.width && frame.width <= 0.97 * screen.width
-          && frame.height >= 0.3 * screen.width && frame.height <= 0.7 * screen.height
-          && (add == nil || frame.maxY <= add!.minY)
-      }
-      .max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
-  }
-
-  private func classify(_ preview: XCUIElementSnapshot) -> Size {
-    let frame = preview.frame
-    if frame.width / frame.height > 1.5 { return .medium }
-    return frame.width < 0.6 * springboard.frame.width ? .small : .large
-  }
-
-  private func swipeToNextPage(at frame: CGRect?) {
-    let screen = springboard.frame
-    let y = frame?.midY ?? screen.height * 0.45
-    let origin = springboard.coordinate(withNormalizedOffset: .zero)
-    let start = origin.withOffset(CGVector(dx: screen.width * 0.85, dy: y))
-    let end = origin.withOffset(CGVector(dx: screen.width * 0.15, dy: y))
-    start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
-    sleep(1)
-  }
-
   // MARK: Elements
 
-  private func elements() -> [XCUIElementSnapshot] {
-    var root: XCUIElementSnapshot?
-    for attempt in 1...3 where root == nil {
-      do {
-        root = try springboard.snapshot()
-      } catch {
-        log("snapshot attempt \(attempt) failed: \(error)")
-        sleep(1)
-      }
-    }
-    guard let root else { return [] }
-    var result: [XCUIElementSnapshot] = []
-    var pending: [XCUIElementSnapshot] = [root]
-    while let item = pending.popLast() {
-      result.append(item)
-      pending.append(contentsOf: item.children.reversed())
-    }
-    return result
+  /// The sheet's button, labeled " Add Widget" on iOS 27.2: an icon character, then the text.
+  private func addWidgetButton() -> XCUIElement {
+    springboard.buttons.matching(NSPredicate(format: "label ENDSWITH 'Add Widget'")).firstMatch
   }
 
   /// A hittable button, menu item or other element labeled `label`, polled until `timeout`.
@@ -287,12 +240,7 @@ final class WidgetDriver: XCTestCase {
   }
 
   private func controlLabels() -> [String] {
-    elements().filter { $0.elementType == .button || $0.elementType == .menuItem }.map(\.label)
-  }
-
-  private func describe(_ item: XCUIElementSnapshot) -> String {
-    let value = item.value.map { " value='\($0)'" } ?? ""
-    return "[type \(item.elementType.rawValue) '\(item.label)' id='\(item.identifier)'\(value) \(item.frame)]"
+    springboard.buttons.allElementsBoundByIndex.map(\.label)
   }
 
   // MARK: Evidence
@@ -310,6 +258,7 @@ final class WidgetDriver: XCTestCase {
     }
   }
 
+  /// A screenshot and the accessibility tree, as files for the artifact and as test attachments.
   private func snap(_ name: String) {
     step += 1
     let base = String(format: "%@-%02d-%@", label, step, name)

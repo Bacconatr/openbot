@@ -51,7 +51,8 @@ jobs:
       EXPO_NO_TELEMETRY: "1"
       # Makes the lab build publish sample agents to the widget on launch (widget-lab-fixture.ts).
       EXPO_PUBLIC_WIDGET_LAB: "1"
-      CAS: ${{ github.workspace }}/../widget-lab-cas
+      # actions/cache refuses a path with .. in it, so the cache sits in the runner home.
+      CAS: /Users/runner/widget-lab-cas
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -208,7 +209,7 @@ jobs:
           cp "$RUNNER_TEMP/app/build-info.txt" "$RUNNER_TEMP/shots/"
           app=$(find "$RUNNER_TEMP/app" -maxdepth 1 -name '*.app' | head -1)
           bash .github/widget-lab/shots.sh --app "$app" --search "$SEARCH" --sizes "$SIZES" \
-            --launch-wait "$LAUNCH_WAIT" --page-by-index --out "$RUNNER_TEMP/shots"
+            --launch-wait "$LAUNCH_WAIT" --out "$RUNNER_TEMP/shots"
 
       - name: Summarize
         if: always()

@@ -2,15 +2,14 @@
 # Puts a home-screen widget on fresh iPhone simulators and screenshots it, one simulator per size.
 #
 #   shots.sh --search TEXT --out DIR [--sizes small,medium,large] [--app PATH.app]
-#            [--page-by-index] [--launch-wait SECONDS] [--device NAME]
+#            [--launch-wait SECONDS] [--device NAME]
 #
 # With --app it installs the app on a base simulator, launches it once so it can publish widget
 # data, and checks its App Group. Each size then gets a clone of that simulator, so every
-# screenshot shows exactly one widget. --page-by-index adds gallery page 0, 1 or 2 for small, medium
-# or large instead of reading the preview size (right for an app with one widget).
+# screenshot shows exactly one widget.
 set -euo pipefail
 
-search="" out="" sizes="small,medium,large" app="" page_by_index="" launch_wait=15 device="iPhone 18 Pro"
+search="" out="" sizes="small,medium,large" app="" launch_wait=15 device="iPhone 18 Pro"
 bundle_id="run.openbot.mobile" app_group="group.run.openbot.mobile"
 while (($#)); do
   case "$1" in
@@ -18,7 +17,6 @@ while (($#)); do
     --out) out=$2; shift ;;
     --sizes) sizes=$2; shift ;;
     --app) app=$2; shift ;;
-    --page-by-index) page_by_index=1 ;;
     --launch-wait) launch_wait=$2; shift ;;
     --device) device=$2; shift ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
@@ -43,10 +41,12 @@ read -r runtime device_type < <(xcrun simctl list -j runtimes | python3 -c '
 import json, sys
 want = sys.argv[1]
 ios = [r for r in json.load(sys.stdin)["runtimes"] if r.get("platform") == "iOS" and r.get("isAvailable")]
+# The newest runtime that runs the wanted device. A device-specific runtime of the same version
+# (iOS-27-2-iPhone19-4, iPhone Duo only) is also listed; an unfiltered pick got it once.
+ios = [r for r in ios if any(t["name"] == want for t in r.get("supportedDeviceTypes", []))]
 ios.sort(key=lambda r: [int(p) for p in r["version"].split(".")])
 runtime = ios[-1]
-types = runtime.get("supportedDeviceTypes", [])
-match = [t for t in types if t["name"] == want] or [t for t in types if t.get("productFamily") == "iPhone"]
+match = [t for t in runtime["supportedDeviceTypes"] if t["name"] == want]
 print(runtime["identifier"], match[0]["identifier"])
 ' "$device")
 [[ -n ${device_type:-} ]] || { echo "found no iOS simulator runtime with an iPhone" >&2; exit 1; }
@@ -95,21 +95,15 @@ xcrun simctl shutdown "$base"
 
 status=0
 IFS=, read -ra size_list <<< "$sizes"
-for index in "${!size_list[@]}"; do
-  size=${size_list[$index]}
+for size in "${size_list[@]}"; do
   sim=$(xcrun simctl clone "$base" "widget-lab-$size")
   timed boot "$sim"
   xcrun simctl ui "$sim" appearance light
   xcrun simctl status_bar "$sim" override --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
     --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
   sleep 10
-  page=""
-  if [[ -n $page_by_index ]]; then
-    case $size in small) page=0 ;; medium) page=1 ;; large) page=2 ;; esac
-  fi
   start=$SECONDS
-  if TEST_RUNNER_WIDGET_SEARCH="$search" TEST_RUNNER_WIDGET_SIZE="$size" TEST_RUNNER_WIDGET_PAGE="$page" \
-    TEST_RUNNER_LAB_OUT_DIR="$out/steps" TEST_RUNNER_LAB_LABEL="$size" \
+  if TEST_RUNNER_WIDGET_SEARCH="$search" TEST_RUNNER_WIDGET_SIZE="$size" TEST_RUNNER_LAB_OUT_DIR="$out/steps" TEST_RUNNER_LAB_LABEL="$size" \
     xcodebuild test-without-building -project "$here/driver/WidgetDriver.xcodeproj" -scheme WidgetDriver \
       -derivedDataPath "$driver_dd" -destination "id=$sim" \
       -only-testing:WidgetDriverUITests/WidgetDriver/testAddWidget \
