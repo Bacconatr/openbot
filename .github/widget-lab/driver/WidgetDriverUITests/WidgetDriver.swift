@@ -186,16 +186,7 @@ final class WidgetDriver: XCTestCase {
     if let date = spot(timeout: 3, { $0.label.contains("Top Widget") }) {
       tap(date)
       sleep(3)
-      snap("inline-picker")
-      log("inline picker elements: \(labeled())")
-      do {
-        try openLockApp(named: search)
-        snap("inline-app")
-        log("inline app widgets: \(labeled())")
-        log("added \(addLockPreviews(max: 1)) inline widget")
-      } catch {
-        log("inline: \(error.localizedDescription)")
-      }
+      log("inline widget added: \(addInline(named: search))")
       closeSheet()
     } else {
       log("found no Top Widget slot; elements: \(labeled())")
@@ -405,10 +396,8 @@ final class WidgetDriver: XCTestCase {
 
   /// Taps up to `max` of the app's widget previews, the elements that newly appeared under the app.
   private func addLockPreviews(max: Int) -> Int {
-    let previews = spots { spot in
-      spot.frame.height >= 30 && spot.frame.minY > self.screen.height * 0.35
-        && (spot.label.localizedCaseInsensitiveContains("Agents") || "\(spot.value)".hasPrefix("Widget"))
-    }
+    // Run 45899436059: each preview is a button valued "Widget, Circular" or "Widget, Rectangular".
+    let previews = spots { $0.value.hasPrefix("Widget") && $0.frame.minY > self.screen.height * 0.35 }
     log("previews: \(previews.map { "'\($0.label)' value '\($0.value)' \($0.type.rawValue) \($0.frame)" })")
     var added = 0
     var seen: [CGRect] = []
@@ -423,14 +412,56 @@ final class WidgetDriver: XCTestCase {
     return added
   }
 
+  /// Closes the picker with its close button, else by dragging its grabber down. A tap above the
+  /// sheet lands on the date line and reopens the inline picker (run 45899436059).
   private func closeSheet() {
-    if let close = spot(timeout: 2, { $0.label == "Close" && $0.type == .button }) {
+    if let close = spot(timeout: 2, { $0.label.caseInsensitiveCompare("close") == .orderedSame && $0.type == .button }) {
       tap(close)
+    } else if let grabber = spot(timeout: 1, { $0.label == "Sheet Grabber" }) {
+      log("no close button; dragging the sheet grabber down")
+      drag(from: grabber, toY: screen.height * 0.98)
     } else {
-      log("no Close button; tapping above the sheet")
+      log("no close button or grabber; tapping above the sheet")
       springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
     }
     sleep(2)
+  }
+
+  /// The inline picker lists apps down a sheet whose lower rows start offscreen: expand it, then
+  /// tap the first entry under the app's heading.
+  private func addInline(named name: String) -> Bool {
+    if let grabber = spot(timeout: 2, { $0.label == "Sheet Grabber" }) {
+      drag(from: grabber, toY: screen.height * 0.1)
+      sleep(2)
+    }
+    for attempt in 0..<5 {
+      snap("inline-\(attempt)")
+      log("inline picker: \(labeled())")
+      if let heading = spot(timeout: 1, { $0.label == name && $0.type == .staticText }) {
+        let options = spots {
+          $0.frame.minY > heading.frame.maxY - 2 && $0.frame.minY < heading.frame.maxY + 120
+            && ($0.value.hasPrefix("Widget") || $0.label.hasPrefix(name + ",") || $0.label.contains("waiting"))
+        }
+        if let option = options.first {
+          log("tapping inline option '\(option.label)' value '\(option.value)' \(option.frame)")
+          tap(option)
+          sleep(2)
+          snap("inline-added")
+          return true
+        }
+      }
+      let origin = springboard.coordinate(withNormalizedOffset: .zero)
+      origin.withOffset(CGVector(dx: screen.width / 2, dy: screen.height * 0.85))
+        .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: screen.width / 2, dy: screen.height * 0.55)))
+      sleep(1)
+    }
+    return false
+  }
+
+  private func drag(from spot: Spot, toY y: CGFloat) {
+    let origin = springboard.coordinate(withNormalizedOffset: .zero)
+    origin.withOffset(CGVector(dx: spot.frame.midX, dy: spot.frame.midY))
+      .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: spot.frame.midX, dy: y)))
   }
 
   // MARK: Snapshots
