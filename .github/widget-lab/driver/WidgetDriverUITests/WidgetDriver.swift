@@ -116,17 +116,25 @@ final class WidgetDriver: XCTestCase {
     let fieldBottom = field.frame.maxY
     let keyboard = springboard.keyboards.firstMatch
     let keyboardFrame = keyboard.exists ? keyboard.frame : CGRect.null
-    let lowered = name.lowercased()
-    let hits = elements()
-      .filter { item in
-        item.elementType != .searchField && item.frame.width > 0 && item.frame.height > 0
-          && item.frame.minY >= fieldBottom && !item.frame.intersects(keyboardFrame)
-          && (item.label.lowercased() == lowered || item.label.lowercased().hasPrefix(lowered + ","))
+    log("after the search, cells \(elements().filter { $0.elementType == .cell }.map(describe)); field bottom \(fieldBottom); keyboard \(keyboardFrame)")
+    // A result row: a cell or text labeled with the name, below the field and above the keyboard.
+    let named = NSPredicate(format: "label ==[c] %@ OR label BEGINSWITH[c] %@", name, name + ",")
+    var hit: XCUIElement?
+    _ = waitUntil(8) {
+      for query in [springboard.cells, springboard.staticTexts, springboard.buttons] {
+        for item in query.matching(named).allElementsBoundByIndex {
+          let frame = item.frame
+          log("result candidate \(item.elementType.rawValue) '\(item.label)' \(frame) hittable \(item.isHittable)")
+          if frame.minY >= fieldBottom && !frame.intersects(keyboardFrame) && item.isHittable {
+            hit = item
+            return true
+          }
+        }
       }
-      .sorted { $0.frame.minY < $1.frame.minY }
-    log("search results for \(name): \(hits.map(describe))")
-    guard let hit = hits.first else { throw failure("the gallery search found nothing named \(name)") }
-    tap(hit)
+      return false
+    }
+    guard let hit else { throw failure("the gallery search found nothing named \(name)") }
+    hit.tap()
     guard control("Add Widget", timeout: 8) != nil else {
       throw failure("tapping the \(name) result did not open its widgets")
     }
@@ -215,7 +223,16 @@ final class WidgetDriver: XCTestCase {
   // MARK: Elements
 
   private func elements() -> [XCUIElementSnapshot] {
-    guard let root = try? springboard.snapshot() else { return [] }
+    var root: XCUIElementSnapshot?
+    for attempt in 1...3 where root == nil {
+      do {
+        root = try springboard.snapshot()
+      } catch {
+        log("snapshot attempt \(attempt) failed: \(error)")
+        sleep(1)
+      }
+    }
+    guard let root else { return [] }
     var result: [XCUIElementSnapshot] = []
     var pending: [XCUIElementSnapshot] = [root]
     while let item = pending.popLast() {
@@ -258,12 +275,6 @@ final class WidgetDriver: XCTestCase {
       button?.tap()
       sleep(1)
     }
-  }
-
-  private func tap(_ item: XCUIElementSnapshot) {
-    springboard.coordinate(withNormalizedOffset: .zero)
-      .withOffset(CGVector(dx: item.frame.midX, dy: item.frame.midY))
-      .tap()
   }
 
   private func waitUntil(_ timeout: TimeInterval, _ condition: () -> Bool) -> Bool {

@@ -6,7 +6,7 @@ name: Widget lab
 # A push to a lab/** branch builds that commit and shoots it. To shoot again without a rebuild:
 #   gh workflow run widget-lab.yml -R Bacconatr/openbot --ref <branch> -f app_run_id=<run id>
 # To build another commit, add -f source_ref=<sha or branch>.
-# To check only the SpringBoard driver on a stock widget: -f widget_search= -f stock_search=Batteries
+# To check only the SpringBoard driver on a stock widget: -f app=false -f stock_search=Batteries
 
 on:
   push:
@@ -19,8 +19,12 @@ on:
       source_ref:
         description: Commit or branch to build (default the ref this runs on)
         default: ""
+      app:
+        description: Build (or reuse) the app and shoot its widget. A dispatch turns an empty input into its default, so this is the off switch.
+        type: boolean
+        default: true
       widget_search:
-        description: Text typed into the widget gallery search (empty skips the app build and shots)
+        description: Text typed into the widget gallery search
         default: OpenBot
       sizes:
         description: Comma-separated sizes (small, medium, large)
@@ -39,7 +43,7 @@ permissions:
 jobs:
   build:
     name: Build the simulator app
-    if: github.event_name == 'push' || (inputs.app_run_id == '' && inputs.widget_search != '')
+    if: github.event_name == 'push' || (inputs.app && inputs.app_run_id == '')
     runs-on: xcode-27
     timeout-minutes: 120
     env:
@@ -172,7 +176,7 @@ jobs:
     name: Shoot the app's widget
     needs: build
     if: >-
-      ${{ !cancelled() && (github.event_name == 'push' || inputs.widget_search != '')
+      ${{ !cancelled() && (github.event_name == 'push' || inputs.app)
       && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     runs-on: xcode-27
     timeout-minutes: 45

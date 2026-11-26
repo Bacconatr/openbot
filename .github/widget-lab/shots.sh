@@ -113,7 +113,7 @@ for index in "${!size_list[@]}"; do
     xcodebuild test-without-building -project "$here/driver/WidgetDriver.xcodeproj" -scheme WidgetDriver \
       -derivedDataPath "$driver_dd" -destination "id=$sim" \
       -only-testing:WidgetDriverUITests/WidgetDriver/testAddWidget \
-      -test-timeouts-enabled YES -maximum-test-execution-time-allowance 300 \
+      -test-timeouts-enabled YES -maximum-test-execution-time-allowance 300 -parallel-testing-enabled NO \
       -resultBundlePath "$out/results/$size.xcresult" > "$out/logs/driver-$size.log" 2>&1; then
     result="added"
   else
@@ -125,17 +125,22 @@ for index in "${!size_list[@]}"; do
     xcrun xcresulttool export attachments --path "$out/results/$size.xcresult" \
       --output-path "$out/steps/$size-attachments" > /dev/null 2>&1 || true
   fi
+  # A failed test run has left the simulator shut down (measured in run 45874010586).
+  if ! xcrun simctl list devices | grep "$sim" | grep -q Booted; then
+    note "- $size: the simulator was shut down after the driver; booting it again for the screenshots"
+    boot "$sim"
+  fi
   # The runner and its host app put icons on the page; remove them before the screenshots.
   xcrun simctl uninstall "$sim" lab.widgetdriver.uitests.xctrunner || true
   xcrun simctl uninstall "$sim" lab.widgetdriver.host || true
   sleep 3
   for appearance in light dark; do
-    xcrun simctl ui "$sim" appearance "$appearance"
+    xcrun simctl ui "$sim" appearance "$appearance" || true
     sleep 5
-    xcrun simctl io "$sim" screenshot "$out/screens/$size-$appearance.png" > /dev/null
+    xcrun simctl io "$sim" screenshot "$out/screens/$size-$appearance.png" > /dev/null || status=1
   done
   note "- $size: $result in $((SECONDS - start)) s; screens/$size-light.png, screens/$size-dark.png"
-  xcrun simctl shutdown "$sim"
-  xcrun simctl delete "$sim"
+  xcrun simctl shutdown "$sim" || true
+  xcrun simctl delete "$sim" || true
 done
 exit $status
