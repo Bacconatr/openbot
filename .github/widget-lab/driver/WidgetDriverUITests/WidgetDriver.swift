@@ -414,17 +414,26 @@ final class WidgetDriver: XCTestCase {
 
   /// Closes the picker with its close button, else by dragging its grabber down. A tap above the
   /// sheet lands on the date line and reopens the inline picker (run 45899436059).
+  /// The picker stacks two sheets, the app's widgets over the app list (run 45903679503), so this
+  /// closes until neither is left.
   private func closeSheet() {
-    if let close = spot(timeout: 2, { $0.label.caseInsensitiveCompare("close") == .orderedSame && $0.type == .button }) {
-      tap(close)
-    } else if let grabber = spot(timeout: 1, { $0.label == "Sheet Grabber" }) {
-      log("no close button; dragging the sheet grabber down")
-      drag(from: grabber, toY: screen.height * 0.98)
-    } else {
-      log("no close button or grabber; tapping above the sheet")
-      springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+    for round in 0..<4 {
+      if let close = spot(timeout: 2, { $0.label.caseInsensitiveCompare("close") == .orderedSame && $0.type == .button }) {
+        log("closing sheet \(round) with its close button")
+        tap(close)
+      } else if let grabber = spot(timeout: 1, { $0.label == "Sheet Grabber" }) {
+        log("closing sheet \(round) by dragging its grabber down")
+        drag(from: grabber, toY: screen.height * 0.98)
+        sleep(2)
+        if spot(timeout: 1, { $0.label == "Sheet Grabber" }) != nil {
+          log("the grabber drag left the sheet up; tapping the wallpaper between widgets and sheet")
+          springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.36)).tap()
+        }
+      } else {
+        return
+      }
+      sleep(2)
     }
-    sleep(2)
   }
 
   /// The inline picker lists apps down a sheet whose lower rows start offscreen: expand it, then
