@@ -103,6 +103,7 @@ final class WidgetDriver: XCTestCase {
     }
     sleep(1)
     snap("gallery")
+    log("gallery apps on screen: \(elements().filter { $0.elementType == .cell }.map(\.label))")
   }
 
   private func openApp(named name: String) throws {

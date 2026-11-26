@@ -6,6 +6,7 @@ name: Widget lab
 # A push to a lab/** branch builds that commit and shoots it. To shoot again without a rebuild:
 #   gh workflow run widget-lab.yml -R Bacconatr/openbot --ref <branch> -f app_run_id=<run id>
 # To build another commit, add -f source_ref=<sha or branch>.
+# To check only the SpringBoard driver on a stock widget: -f widget_search= -f stock_search=Batteries
 
 on:
   push:
@@ -19,7 +20,7 @@ on:
         description: Commit or branch to build (default the ref this runs on)
         default: ""
       widget_search:
-        description: Text typed into the widget gallery search
+        description: Text typed into the widget gallery search (empty skips the app build and shots)
         default: OpenBot
       sizes:
         description: Comma-separated sizes (small, medium, large)
@@ -28,7 +29,7 @@ on:
         description: Seconds the app runs before the widget is added
         default: "15"
       stock_search:
-        description: Also check the driver on this stock app's widget (empty skips)
+        description: Also check the driver on this stock app's widget, such as Batteries (empty skips)
         default: ""
 
 permissions:
@@ -38,7 +39,7 @@ permissions:
 jobs:
   build:
     name: Build the simulator app
-    if: github.event_name == 'push' || inputs.app_run_id == ''
+    if: github.event_name == 'push' || (inputs.app_run_id == '' && inputs.widget_search != '')
     runs-on: xcode-27
     timeout-minutes: 120
     env:
@@ -170,7 +171,9 @@ jobs:
   app-shots:
     name: Shoot the app's widget
     needs: build
-    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    if: >-
+      ${{ !cancelled() && (github.event_name == 'push' || inputs.widget_search != '')
+      && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     runs-on: xcode-27
     timeout-minutes: 45
     env:
@@ -221,7 +224,8 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 45
     env:
-      SEARCH: ${{ inputs.stock_search || 'Calendar' }}
+      # The iOS 27 gallery lists Batteries but has no Calendar entry, so Calendar finds nothing.
+      SEARCH: ${{ inputs.stock_search || 'Batteries' }}
       SIZES: ${{ inputs.sizes || 'small,medium,large' }}
     steps:
       - name: Check out
