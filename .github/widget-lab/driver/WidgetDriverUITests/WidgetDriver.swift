@@ -288,7 +288,7 @@ final class WidgetDriver: XCTestCase {
     }
     sleep(1)
     snap("gallery")
-    log("gallery apps: \(springboard.cells.allElementsBoundByIndex.map(\.label))")
+    log("gallery: \(labeled())")
   }
 
   private func openApp(named name: String) throws {

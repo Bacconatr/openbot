@@ -213,8 +213,8 @@ jobs:
       - name: Add the widget and take screenshots
         run: |
           tar -xzf "$RUNNER_TEMP/app/app.tgz" -C "$RUNNER_TEMP/app"
-          mkdir -p "$RUNNER_TEMP/shots"
-          cp "$RUNNER_TEMP/app/build-info.txt" "$RUNNER_TEMP/shots/"
+          mkdir -p "$RUNNER_TEMP/shots/${{ matrix.phase }}"
+          cp "$RUNNER_TEMP/app/build-info.txt" "$RUNNER_TEMP/shots/${{ matrix.phase }}/"
           app=$(find "$RUNNER_TEMP/app" -maxdepth 1 -name '*.app' | head -1)
           bash .github/widget-lab/shots.sh --app "$app" --search "$SEARCH" --phases "${{ matrix.phase }}" \
             --launch-wait "$LAUNCH_WAIT" --out "$RUNNER_TEMP/shots/${{ matrix.phase }}"
