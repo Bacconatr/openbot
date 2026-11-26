@@ -207,7 +207,7 @@ phase_size() {
   sim=$(fresh_sim "$size")
   [[ $size == large ]] && rec_start "$sim" gallery
   local added=1
-  drive "$sim" "$size" testAddWidget "WIDGET_SIZE=$size" || added=0
+  drive "$sim" "$size" testAddWidget "WIDGET_SIZE=$size" "PAGE_HOLD=$([[ $size == large ]] && echo 4 || echo 1)" || added=0
   [[ $size == large ]] && { sleep 2; rec_stop gallery; note "- clips/gallery.mp4: adding the $size widget from the gallery; driver timeline steps/$size-driver.log, recording began at $rec_started ms"; }
   if ((added == 0)); then
     fail "$size: the driver could not add the widget"

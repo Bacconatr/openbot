@@ -343,7 +343,7 @@ final class WidgetDriver: XCTestCase {
         .press(
           forDuration: 0.01, thenDragTo: origin.withOffset(CGVector(dx: screen.width * 0.15, dy: y)),
           withVelocity: .fast, thenHoldForDuration: 0)
-      sleep(1)
+      sleep(UInt32(env["PAGE_HOLD"] ?? "") ?? 1)
     }
     throw failure("no \(size.rawValue) widget in the first 12 gallery pages")
   }
