@@ -319,6 +319,10 @@ final class WidgetDriver: XCTestCase {
   /// Pages through the app's previews until the one in view has the size.
   private func showPreview(of size: Size) throws {
     let screen = springboard.frame
+    // Filming: the first preview stays a placeholder for 6 s or more while the extension starts
+    // (run 45903853731), so wait it out on camera.
+    let hold = UInt32(env["PAGE_HOLD"] ?? "") ?? 1
+    if hold > 1 { sleep(hold * 3) }
     for page in 0..<12 {
       let previews = springboard.buttons.matching(NSPredicate(format: "value BEGINSWITH[c] 'Widget'"))
         .allElementsBoundByIndex
@@ -334,7 +338,7 @@ final class WidgetDriver: XCTestCase {
         .press(
           forDuration: 0.01, thenDragTo: origin.withOffset(CGVector(dx: screen.width * 0.15, dy: y)),
           withVelocity: .fast, thenHoldForDuration: 0)
-      sleep(UInt32(env["PAGE_HOLD"] ?? "") ?? 1)
+      sleep(hold)
     }
     throw failure("no \(size.rawValue) widget in the first 12 gallery pages")
   }
