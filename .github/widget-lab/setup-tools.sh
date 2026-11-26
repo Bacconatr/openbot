@@ -15,3 +15,7 @@ curl -fsSL -o "$dir/xcodegen.zip" "https://github.com/yonaskolb/XcodeGen/release
 unzip -q -o "$dir/xcodegen.zip" -d "$dir"
 echo "$dir/xcodegen/bin" >> "$GITHUB_PATH"
 "$dir/xcodegen/bin/xcodegen" --version
+
+# recordVideo clips are resampled with ffmpeg (shots.sh rec_stop).
+command -v ffmpeg > /dev/null || HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install --quiet ffmpeg || echo "ffmpeg unavailable; clips stay raw"
+ffmpeg -version 2> /dev/null | head -1 || true

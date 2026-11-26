@@ -156,7 +156,17 @@ rec_stop() {
   kill -INT "$rec_pid" 2> /dev/null || true
   wait "$rec_pid" 2> /dev/null || true
   rec_pid=""
-  [[ -s "$out/clips/$1.mp4" ]] || fail "clip $1 is empty (logs/rec-$1.log)"
+  local raw="$out/clips/$1.mp4"
+  [[ -s $raw ]] || { fail "clip $1 is empty (logs/rec-$1.log)"; return; }
+  # recordVideo writes a frame only when the screen changes, so a still end state has no length
+  # (run 45901706785: 15 s of a still page came out 0.07 s). Resample to 60 fps and hold the last
+  # frame 2 s; the raw file stays beside it.
+  if command -v ffmpeg > /dev/null; then
+    mv "$raw" "$out/clips/$1-raw.mp4"
+    ffmpeg -v error -y -i "$out/clips/$1-raw.mp4" -vf "fps=60,tpad=stop_mode=clone:stop_duration=2" \
+      -c:v libx264 -crf 14 -preset medium -pix_fmt yuv420p -movflags +faststart "$raw" \
+      || fail "could not resample clip $1"
+  fi
 }
 
 app_data() { xcrun simctl get_app_container "$1" "$bundle_id" data; }
@@ -165,6 +175,15 @@ app_data() { xcrun simctl get_app_container "$1" "$bundle_id" data; }
 
 base=$(xcrun simctl create widget-lab-base "$device_type" "$runtime")
 boot "$base"
+
+# New apps go to the App Library only, so the driver's runner never puts an icon in a shot or clip.
+# Set before the app is installed: with its icon on page 2, closing the app returned SpringBoard to
+# page 2, away from the widget (run 45901706785).
+if drive "$base" base testNewAppsToAppLibrary; then
+  note "- New apps go to the App Library only"
+else
+  note "- Could not set new apps to the App Library only; the runner's icon may show while it runs"
+fi
 
 if [[ -n $app ]]; then
   xcrun simctl install "$base" "$app"
@@ -190,13 +209,6 @@ if [[ -n $app ]]; then
   note "- Fixture files after launch: $(cd "$data/Documents" 2>/dev/null && ls widget-lab-* 2>/dev/null | tr '\n' ' ')"
   cat "$data/Documents/widget-lab-published.txt" > "$out/logs/base-published.txt" 2>/dev/null || true
   xcrun simctl terminate "$base" "$bundle_id" || true
-fi
-
-# New apps go to the App Library only, so the driver's runner never puts an icon in a shot or clip.
-if drive "$base" base testNewAppsToAppLibrary; then
-  note "- New apps go to the App Library only"
-else
-  note "- Could not set new apps to the App Library only; the runner's icon may show while it runs"
 fi
 xcrun simctl shutdown "$base"
 
