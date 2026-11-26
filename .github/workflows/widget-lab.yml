@@ -1,0 +1,246 @@
+name: Widget lab
+
+# Fork-only lab tooling, never upstream. Builds the OpenBot iOS app for the simulator, adds its
+# home-screen widget on fresh simulators and screenshots each size in light and dark mode.
+#
+# A push to a lab/** branch builds that commit and shoots it. To shoot again without a rebuild:
+#   gh workflow run widget-lab.yml -R Bacconatr/openbot --ref <branch> -f app_run_id=<run id>
+# To build another commit, add -f source_ref=<sha or branch>.
+
+on:
+  push:
+    branches: ["lab/**"]
+  workflow_dispatch:
+    inputs:
+      app_run_id:
+        description: Reuse the openbot-sim-app artifact of this run instead of building
+        default: ""
+      source_ref:
+        description: Commit or branch to build (default the ref this runs on)
+        default: ""
+      widget_search:
+        description: Text typed into the widget gallery search
+        default: OpenBot
+      sizes:
+        description: Comma-separated sizes (small, medium, large)
+        default: small,medium,large
+      launch_wait:
+        description: Seconds the app runs before the widget is added
+        default: "15"
+      stock_search:
+        description: Also check the driver on this stock app's widget (empty skips)
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    name: Build the simulator app
+    if: github.event_name == 'push' || inputs.app_run_id == ''
+    runs-on: xcode-27
+    timeout-minutes: 120
+    env:
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+      # Makes the lab build publish sample agents to the widget on launch (widget-lab-fixture.ts).
+      EXPO_PUBLIC_WIDGET_LAB: "1"
+      CAS: ${{ github.workspace }}/../widget-lab-cas
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Bun and Node
+        uses: ./.github/actions/setup-bun
+        with:
+          install: none
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_27.1.app/Contents/Developer
+          xcodebuild -version
+          pod --version
+          df -h "$GITHUB_WORKSPACE" | tail -1
+
+      - name: Restore the Bun download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: widget-lab-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: widget-lab-bun-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate the iOS project
+        working-directory: apps/mobile
+        run: node ../../node_modules/expo/bin/cli prebuild --platform ios --no-install
+
+      - name: Restore the CocoaPods download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: widget-lab-pods-${{ hashFiles('apps/mobile/ios/Podfile', 'bun.lock') }}
+          restore-keys: widget-lab-pods-
+
+      - name: Install pods
+        working-directory: apps/mobile/ios
+        run: pod install
+
+      # Xcode's content-addressed compilation cache, the one `bun mobile:ios` uses locally. Entries
+      # are keyed by their inputs, so a stale restore costs nothing but misses.
+      - name: Restore the Xcode compilation cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CAS }}
+          key: widget-lab-cas-${{ github.run_id }}
+          restore-keys: widget-lab-cas-
+
+      - name: Build the Release app for the simulator
+        id: build
+        run: |
+          set -o pipefail
+          workspace=$(ls -d apps/mobile/ios/*.xcworkspace | head -1)
+          scheme=$(basename "$workspace" .xcworkspace)
+          du -sh "$CAS" 2>/dev/null || echo "no compilation cache restored"
+          xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Release \
+            -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$RUNNER_TEMP/dd" ARCHS=arm64 \
+            COMPILATION_CACHE_ENABLE_CACHING=YES "COMPILATION_CACHE_CAS_PATH=$CAS" \
+            COMPILATION_CACHE_LIMIT_SIZE=8G \
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log" | xcbeautify --quiet --is-ci
+          du -sh "$CAS" "$RUNNER_TEMP/dd"
+          df -h "$GITHUB_WORKSPACE" | tail -1
+
+      - name: Save the Xcode compilation cache
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CAS }}
+          key: widget-lab-cas-${{ github.run_id }}
+
+      - name: Package the app and record its entitlements
+        run: |
+          products="$RUNNER_TEMP/dd/Build/Products/Release-iphonesimulator"
+          app=$(find "$products" -maxdepth 1 -name '*.app' | head -1)
+          out="$RUNNER_TEMP/app-out"
+          mkdir -p "$out"
+          tar -czf "$out/app.tgz" -C "$products" "$(basename "$app")"
+          {
+            echo "source: $(git rev-parse HEAD)"
+            echo "xcode: $(xcodebuild -version | tr '\n' ' ')"
+            echo "app: $(basename "$app")"
+            for bundle in "$app" "$app"/PlugIns/*.appex; do
+              exe="$bundle/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle/Info.plist")"
+              echo
+              echo "== $(basename "$bundle")"
+              echo "-- signature entitlements"
+              codesign -d --entitlements - --xml "$bundle" 2>/dev/null | plutil -p - || echo "(none)"
+              echo "-- __TEXT,__entitlements section (the simulator reads these)"
+              if segedit "$exe" -extract __TEXT __entitlements "$RUNNER_TEMP/section.plist" 2>/dev/null; then
+                plutil -p "$RUNNER_TEMP/section.plist"
+              else
+                echo "(no section)"
+              fi
+            done
+          } | tee "$out/build-info.txt"
+
+      - name: Upload the app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: openbot-sim-app
+          path: ${{ runner.temp }}/app-out
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the build log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: xcodebuild-log
+          path: ${{ runner.temp }}/xcodebuild.log
+          retention-days: 7
+
+  app-shots:
+    name: Shoot the app's widget
+    needs: build
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: xcode-27
+    timeout-minutes: 45
+    env:
+      SEARCH: ${{ inputs.widget_search || 'OpenBot' }}
+      SIZES: ${{ inputs.sizes || 'small,medium,large' }}
+      LAUNCH_WAIT: ${{ inputs.launch_wait || '15' }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the app
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: openbot-sim-app
+          path: ${{ runner.temp }}/app
+          run-id: ${{ inputs.app_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Set up the tools
+        run: .github/widget-lab/setup-tools.sh
+
+      - name: Add the widget and take screenshots
+        run: |
+          tar -xzf "$RUNNER_TEMP/app/app.tgz" -C "$RUNNER_TEMP/app"
+          mkdir -p "$RUNNER_TEMP/shots"
+          cp "$RUNNER_TEMP/app/build-info.txt" "$RUNNER_TEMP/shots/"
+          app=$(find "$RUNNER_TEMP/app" -maxdepth 1 -name '*.app' | head -1)
+          .github/widget-lab/shots.sh --app "$app" --search "$SEARCH" --sizes "$SIZES" \
+            --launch-wait "$LAUNCH_WAIT" --page-by-index --out "$RUNNER_TEMP/shots"
+
+      - name: Summarize
+        if: always()
+        run: cat "$RUNNER_TEMP/shots/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: widget-shots-app
+          path: ${{ runner.temp }}/shots
+          retention-days: 14
+
+  stock-shots:
+    name: Check the driver on a stock widget
+    if: github.event_name == 'push' || inputs.stock_search != ''
+    runs-on: xcode-27
+    timeout-minutes: 45
+    env:
+      SEARCH: ${{ inputs.stock_search || 'Calendar' }}
+      SIZES: ${{ inputs.sizes || 'small,medium,large' }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the tools
+        run: .github/widget-lab/setup-tools.sh
+
+      - name: Add the widget and take screenshots
+        run: .github/widget-lab/shots.sh --search "$SEARCH" --sizes "$SIZES" --out "$RUNNER_TEMP/shots"
+
+      - name: Summarize
+        if: always()
+        run: cat "$RUNNER_TEMP/shots/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: widget-shots-stock
+          path: ${{ runner.temp }}/shots
+          retention-days: 14
