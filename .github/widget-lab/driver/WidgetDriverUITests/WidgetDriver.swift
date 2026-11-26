@@ -141,78 +141,81 @@ final class WidgetDriver: XCTestCase {
     snap("opened")
   }
 
-  /// Lock Screen editor: adds the app's circular and rectangular widgets below the clock and its
-  /// inline widget above it, then leaves the device on the Lock Screen.
+  /// Lock Screen editor: adds the app's accessory widgets below the clock and its inline widget
+  /// above it, then leaves the device on the Lock Screen.
+  ///
+  /// Measured on iOS 27.2 (run 45896636629): long-press, Customize opens the editor directly. Its
+  /// slots are SpringBoard buttons "Add Widget" (below the clock) and "Calendar, Date, Top Widget",
+  /// repeated for each wallpaper page, so only the one inside the screen counts.
   func testLockScreenWidgets() throws {
     let search = try searchText()
     goHome()
     lockAndWake()
     snap("locked")
-    log("lock screen: springboard \(springboard.state.rawValue) posterboard \(posterboard.state.rawValue)")
     springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)).press(forDuration: 2.0)
     sleep(2)
     snap("long-pressed")
-    guard let customize = control("Customize", timeout: 6) else {
-      throw failure("long-pressing the Lock Screen showed no Customize; controls: \(controlLabels())")
+    guard let customize = spot(timeout: 6, { $0.label == "Customize" }) else {
+      throw failure("long-pressing the Lock Screen showed no Customize; elements: \(labeled())")
     }
-    customize.tap()
-    sleep(2)
-    snap("customize")
-    if let lock = control("Lock Screen", timeout: 4, types: [.button, .other, .cell, .image, .staticText]) {
-      lock.tap()
+    tap(customize)
+    sleep(3)
+    if let choice = spot(timeout: 2, { $0.label == "Lock Screen" }) {
+      tap(choice)
       sleep(2)
-    } else {
-      log("no Lock Screen choice; assuming the editor opened directly")
     }
     snap("editor")
 
-    // Below the clock: circular and rectangular.
-    let widgetsSlot = control("Add Widgets", timeout: 6, types: [.button, .other])
-      ?? control("Widgets", timeout: 2, types: [.button, .other])
-    guard let widgetsSlot else { throw failure("the Lock Screen editor shows no Add Widgets slot; controls: \(controlLabels())") }
-    widgetsSlot.tap()
-    sleep(2)
+    // Below the clock.
+    guard let slot = spot(timeout: 6, { $0.label == "Add Widget" && $0.frame.midY > self.screen.height * 0.5 }) else {
+      throw failure("the Lock Screen editor shows no Add Widget slot; elements: \(labeled())")
+    }
+    tap(slot)
+    sleep(3)
     snap("widget-picker")
+    log("picker elements: \(labeled())")
     try openLockApp(named: search)
     snap("app-widgets")
+    log("app widgets: \(labeled())")
     let added = addLockPreviews(max: 2)
     log("added \(added) accessory widgets below the clock")
     closeSheet()
     snap("below-clock")
 
-    // Above the clock: inline, from the date line.
-    let date = control("Date", timeout: 1, types: [.button, .other])
-      ?? firstElement(NSPredicate(format: "label CONTAINS[c] %@", weekday()), types: [.button, .other, .staticText])
-    if let date {
-      log("tapping the date '\(date.label)'")
-      date.tap()
-      sleep(2)
+    // Above the clock: the inline widget replaces the date line's calendar.
+    if let date = spot(timeout: 3, { $0.label.contains("Top Widget") }) {
+      tap(date)
+      sleep(3)
       snap("inline-picker")
+      log("inline picker elements: \(labeled())")
       do {
         try openLockApp(named: search)
         snap("inline-app")
+        log("inline app widgets: \(labeled())")
         log("added \(addLockPreviews(max: 1)) inline widget")
       } catch {
         log("inline: \(error.localizedDescription)")
       }
       closeSheet()
     } else {
-      log("found no date control above the clock; controls: \(controlLabels())")
+      log("found no Top Widget slot; elements: \(labeled())")
     }
     snap("edited")
 
-    guard let done = control("Done", timeout: 4, types: [.button]) else {
-      throw failure("the Lock Screen editor has no Done; controls: \(controlLabels())")
+    guard let done = spot(timeout: 4, { $0.label == "Done" }) else {
+      throw failure("the Lock Screen editor has no Done; elements: \(labeled())")
     }
-    done.tap()
+    tap(done)
     sleep(3)
     snap("after-done")
+    log("after Done: \(labeled())")
     // Back in the wallpaper switcher, a tap on the current wallpaper returns to the Lock Screen.
-    if control("Customize", timeout: 2) != nil {
-      springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+    if spot(timeout: 2, { $0.label == "Customize" }) != nil {
+      springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
       sleep(3)
     }
     snap("lock-screen")
+    log("lock screen: \(labeled())")
     if added == 0 { throw failure("no accessory widget was added below the clock") }
   }
 
@@ -372,71 +375,112 @@ final class WidgetDriver: XCTestCase {
 
   /// In the Lock Screen widget picker: finds the app by search field or by scrolling, and opens it.
   private func openLockApp(named name: String) throws {
-    let named = NSPredicate(format: "label ==[c] %@ OR label BEGINSWITH[c] %@", name, name + ",")
-    let types: [XCUIElement.ElementType] = [.cell, .button, .staticText, .other]
-    for app in [springboard, posterboard] where isUp(app) && app.searchFields.firstMatch.exists {
-      let field = app.searchFields.firstMatch
-      log("typing into the picker search field of \(app == springboard ? "SpringBoard" : "PosterBoard")")
-      field.tap()
-      sleep(1)
-      field.typeText(name)
-      sleep(2)
-      break
+    let isApp: (Spot) -> Bool = {
+      ($0.label.caseInsensitiveCompare(name) == .orderedSame || $0.label.lowercased().hasPrefix(name.lowercased() + ","))
+        && $0.type != .searchField
     }
-    var hit: XCUIElement?
+    if let field = spot(timeout: 1, { $0.type == .searchField }) {
+      log("typing into the picker search field '\(field.label)'")
+      tap(field)
+      sleep(1)
+      springboard.typeText(name)
+      sleep(2)
+      snap("picker-search")
+    }
+    var hit: Spot?
     for attempt in 0..<8 {
-      hit = firstElement(named, types: types, hittable: true)
+      hit = spot(timeout: 1, isApp)
       if hit != nil { break }
-      log("picker attempt \(attempt): no \(name); texts \(staticTexts().prefix(40))")
-      // Scroll the picker list up.
+      log("picker attempt \(attempt): no \(name)")
       let origin = springboard.coordinate(withNormalizedOffset: .zero)
-      let screen = springboard.frame
       origin.withOffset(CGVector(dx: screen.width / 2, dy: screen.height * 0.85))
         .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: screen.width / 2, dy: screen.height * 0.6)))
       sleep(1)
     }
-    guard let hit else { throw failure("the Lock Screen picker lists no \(name)") }
+    guard let hit else { throw failure("the Lock Screen picker lists no \(name); elements: \(labeled())") }
     log("tapping picker app '\(hit.label)' \(hit.frame)")
-    hit.tap()
+    tap(hit)
     sleep(2)
   }
 
-  /// Taps up to `max` of the app's widget previews in the open picker, logging what each was.
+  /// Taps up to `max` of the app's widget previews, the elements that newly appeared under the app.
   private func addLockPreviews(max: Int) -> Int {
+    let previews = spots { spot in
+      spot.frame.height >= 30 && spot.frame.minY > self.screen.height * 0.35
+        && (spot.label.localizedCaseInsensitiveContains("Agents") || "\(spot.value)".hasPrefix("Widget"))
+    }
+    log("previews: \(previews.map { "'\($0.label)' value '\($0.value)' \($0.type.rawValue) \($0.frame)" })")
     var added = 0
-    for app in [springboard, posterboard] where isUp(app) {
-      let previews = app.descendants(matching: .any)
-        .matching(NSPredicate(format: "value BEGINSWITH[c] 'Widget' OR label CONTAINS[c] 'Agents'"))
-        .allElementsBoundByIndex
-        .filter { $0.exists && $0.isHittable && $0.frame.width > 0 }
-      log("picker previews in \(app == springboard ? "SpringBoard" : "PosterBoard"): \(previews.map { "'\($0.label)' value '\($0.value ?? "")' \($0.frame)" })")
-      for preview in previews where added < max {
-        log("tapping preview '\(preview.label)' value '\(preview.value ?? "")'")
-        preview.tap()
-        added += 1
-        sleep(2)
-        snap("preview-\(added)")
-      }
-      if added > 0 { break }
+    var seen: [CGRect] = []
+    for preview in previews where added < max && !seen.contains(where: { $0.intersects(preview.frame) }) {
+      seen.append(preview.frame)
+      log("tapping preview '\(preview.label)' value '\(preview.value)'")
+      tap(preview)
+      added += 1
+      sleep(2)
+      snap("preview-\(added)")
     }
     return added
   }
 
   private func closeSheet() {
-    if let close = control("Close", timeout: 2, types: [.button]) {
-      close.tap()
+    if let close = spot(timeout: 2, { $0.label == "Close" && $0.type == .button }) {
+      tap(close)
     } else {
       log("no Close button; tapping above the sheet")
-      springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+      springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
     }
     sleep(2)
   }
 
-  private func weekday() -> String {
-    let format = DateFormatter()
-    format.locale = Locale(identifier: "en_US")
-    format.dateFormat = "EEEE"
-    return format.string(from: Date())
+  // MARK: Snapshots
+
+  /// One labeled element from an atomic snapshot of SpringBoard. Element queries on SpringBoard fail
+  /// with "Failed to get matching snapshot" when a sheet changes mid-query; a snapshot cannot.
+  private struct Spot {
+    let label: String
+    let value: String
+    let type: XCUIElement.ElementType
+    let frame: CGRect
+  }
+
+  private var screen: CGRect { springboard.frame }
+
+  /// Every labeled element inside the screen that matches, in tree order.
+  private func spots(_ match: (Spot) -> Bool) -> [Spot] {
+    guard let root = try? springboard.snapshot() else { return [] }
+    let bounds = screen
+    var found: [Spot] = []
+    var stack: [XCUIElementSnapshot] = [root]
+    while let node = stack.popLast() {
+      stack.append(contentsOf: node.children.reversed())
+      let item = Spot(
+        label: node.label, value: node.value.map { "\($0)" } ?? "", type: node.elementType, frame: node.frame)
+      guard !item.label.isEmpty || !item.value.isEmpty else { continue }
+      guard item.frame.width > 0, item.frame.height > 0, bounds.contains(CGPoint(x: item.frame.midX, y: item.frame.midY))
+      else { continue }
+      if match(item) { found.append(item) }
+    }
+    return found
+  }
+
+  private func spot(timeout: TimeInterval, _ match: (Spot) -> Bool) -> Spot? {
+    var hit: Spot?
+    _ = waitUntil(timeout) {
+      hit = spots(match).first
+      return hit != nil
+    }
+    return hit
+  }
+
+  private func tap(_ spot: Spot) {
+    springboard.coordinate(withNormalizedOffset: .zero)
+      .withOffset(CGVector(dx: spot.frame.midX, dy: spot.frame.midY)).tap()
+  }
+
+  /// The labeled elements on screen, for the log.
+  private func labeled() -> [String] {
+    spots { _ in true }.map { "\($0.type.rawValue):'\($0.label)'\($0.value.isEmpty ? "" : "=\($0.value)")" }
   }
 
   // MARK: Elements
@@ -508,13 +552,7 @@ final class WidgetDriver: XCTestCase {
   }
 
   private func controlLabels() -> [String] {
-    [springboard, posterboard].filter(isUp)
-      .flatMap { $0.buttons.allElementsBoundByIndex.map(\.label) }
-  }
-
-  private func staticTexts() -> [String] {
-    [springboard, posterboard].filter(isUp)
-      .flatMap { $0.staticTexts.allElementsBoundByIndex.map(\.label) }
+    spots { $0.type == .button }.map(\.label)
   }
 
   // MARK: Evidence
