@@ -21,6 +21,7 @@ import { UpdateRequiredOverlay } from "@/features/app-update/components/update-r
 import { DevelopmentConnectLinkHandler } from "@/features/auth/components/development-connect-link-handler";
 import { MobileSessionProvider, useMobileSession } from "@/features/auth/context/mobile-session-context";
 import { backgroundRefreshNative } from "@/features/background-refresh/background-refresh-native";
+import { publishWidgetLabFixture } from "@/features/home-widget/widget-lab-fixture";
 import { loadOnboardingProgress } from "@/features/onboarding/model/onboarding-progress";
 import { resetNotificationAvatars } from "@/features/push-notifications/notification-avatars";
 import { installNotificationHandler } from "@/features/push-notifications/use-notification-taps";
@@ -70,6 +71,8 @@ import { queryClient } from "@/shared/lib/query-client";
 import { useText } from "@/shared/lib/text";
 import { untilForeground } from "@/shared/lib/until-foreground";
 import { SplashContentReadyContext, useSplashGate } from "@/shared/lib/use-splash-gate";
+
+setTimeout(() => void publishWidgetLabFixture().catch(() => undefined), 3000);
 
 export const unstable_settings = {
   anchor: "index",
