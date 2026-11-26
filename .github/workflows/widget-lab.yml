@@ -7,6 +7,7 @@ name: Widget lab
 #   gh workflow run widget-lab.yml -R Bacconatr/openbot --ref <branch> -f app_run_id=<run id>
 # To build another commit, add -f source_ref=<sha or branch>.
 # To check only the SpringBoard driver on a stock widget: -f app=false -f stock_search=Batteries
+# To run some phases only: -f phases='["lock"]'
 
 on:
   push:
@@ -26,8 +27,11 @@ on:
       widget_search:
         description: Text typed into the widget gallery search
         default: OpenBot
+      phases:
+        description: JSON list of app phases (small, medium, large, live, lock, combo), one runner each
+        default: '["small","medium","large","live","lock","combo"]'
       sizes:
-        description: Comma-separated sizes (small, medium, large)
+        description: Comma-separated sizes for the stock check (small, medium, large)
         default: small,medium,large
       launch_wait:
         description: Seconds the app runs before the widget is added
@@ -174,16 +178,20 @@ jobs:
           retention-days: 7
 
   app-shots:
-    name: Shoot the app's widget
+    name: Shoot the app's widget (${{ matrix.phase }})
     needs: build
     if: >-
       ${{ !cancelled() && (github.event_name == 'push' || inputs.app)
       && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     runs-on: xcode-27
-    timeout-minutes: 45
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # One simulator per runner: see shots.sh for what each phase shoots and films.
+        phase: ${{ fromJSON(inputs.phases || '["small","medium","large","live","lock","combo"]') }}
     env:
       SEARCH: ${{ inputs.widget_search || 'OpenBot' }}
-      SIZES: ${{ inputs.sizes || 'small,medium,large' }}
       LAUNCH_WAIT: ${{ inputs.launch_wait || '15' }}
     steps:
       - name: Check out
@@ -208,24 +216,37 @@ jobs:
           mkdir -p "$RUNNER_TEMP/shots"
           cp "$RUNNER_TEMP/app/build-info.txt" "$RUNNER_TEMP/shots/"
           app=$(find "$RUNNER_TEMP/app" -maxdepth 1 -name '*.app' | head -1)
-          bash .github/widget-lab/shots.sh --app "$app" --search "$SEARCH" --sizes "$SIZES" \
-            --launch-wait "$LAUNCH_WAIT" --out "$RUNNER_TEMP/shots"
+          bash .github/widget-lab/shots.sh --app "$app" --search "$SEARCH" --phases "${{ matrix.phase }}" \
+            --launch-wait "$LAUNCH_WAIT" --out "$RUNNER_TEMP/shots/${{ matrix.phase }}"
 
       - name: Summarize
         if: always()
-        run: cat "$RUNNER_TEMP/shots/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+        run: cat "$RUNNER_TEMP/shots/${{ matrix.phase }}/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
-      - name: Upload the screenshots
+      - name: Upload the screenshots and clips
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: widget-shots-app
+          name: widget-shots-app-${{ matrix.phase }}
           path: ${{ runner.temp }}/shots
+          retention-days: 14
+
+  footage:
+    name: Merge every phase into one artifact
+    needs: app-shots
+    if: ${{ !cancelled() && needs.app-shots.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge
+        uses: actions/upload-artifact/merge@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: widget-lab-footage
+          pattern: widget-shots-app-*
           retention-days: 14
 
   stock-shots:
     name: Check the driver on a stock widget
-    if: github.event_name == 'push' || inputs.stock_search != ''
+    if: inputs.stock_search != ''
     runs-on: xcode-27
     timeout-minutes: 45
     env:
@@ -242,7 +263,7 @@ jobs:
         run: bash .github/widget-lab/setup-tools.sh
 
       - name: Add the widget and take screenshots
-        run: bash .github/widget-lab/shots.sh --search "$SEARCH" --sizes "$SIZES" --out "$RUNNER_TEMP/shots"
+        run: bash .github/widget-lab/shots.sh --search "$SEARCH" --phases "$SIZES" --out "$RUNNER_TEMP/shots"
 
       - name: Summarize
         if: always()
