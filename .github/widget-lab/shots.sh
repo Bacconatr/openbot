@@ -115,7 +115,7 @@ fresh_sim() {
     boot "$sim"
     xcrun simctl ui "$sim" appearance light
     xcrun simctl status_bar "$sim" override --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
-      --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
+      --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100 --operatorName ""
     sleep 10
   } >&2
   echo "$sim"
@@ -160,11 +160,14 @@ rec_stop() {
   [[ -s $raw ]] || { fail "clip $1 is empty (logs/rec-$1.log)"; return; }
   # recordVideo writes a frame only when the screen changes, so a still end state has no length
   # (run 45901706785: 15 s of a still page came out 0.07 s). Resample to 60 fps and hold the last
-  # frame 2 s; the raw file stays beside it.
-  if command -v ffmpeg > /dev/null; then
+  # frame 2 s; the raw file stays beside it. Only short clips: re-encoding the 330 s Lock Screen clip
+  # took 39 min on the runner (run 45905777197), and a long clip moves all the way through anyway.
+  local length
+  length=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$raw" 2> /dev/null | cut -d. -f1)
+  if command -v ffmpeg > /dev/null && ((${length:-999} < 60)); then
     mv "$raw" "$out/clips/$1-raw.mp4"
     ffmpeg -v error -y -i "$out/clips/$1-raw.mp4" -vf "fps=60,tpad=stop_mode=clone:stop_duration=2" \
-      -c:v libx264 -crf 14 -preset medium -pix_fmt yuv420p -movflags +faststart "$raw" \
+      -c:v libx264 -crf 14 -preset veryfast -pix_fmt yuv420p -movflags +faststart "$raw" \
       || fail "could not resample clip $1"
   fi
 }

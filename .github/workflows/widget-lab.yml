@@ -184,7 +184,7 @@ jobs:
       ${{ !cancelled() && (github.event_name == 'push' || inputs.app)
       && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 80
     strategy:
       fail-fast: false
       matrix:
