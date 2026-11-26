@@ -107,8 +107,10 @@ jobs:
           workspace=$(ls -d apps/mobile/ios/*.xcworkspace | head -1)
           scheme=$(basename "$workspace" .xcworkspace)
           du -sh "$CAS" 2>/dev/null || echo "no compilation cache restored"
+          # No -sdk: it would force the watchOS targets onto the iOS SDK. The destination picks the
+          # simulator SDK of each target.
           xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Release \
-            -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
+            -destination "generic/platform=iOS Simulator" \
             -derivedDataPath "$RUNNER_TEMP/dd" ARCHS=arm64 \
             COMPILATION_CACHE_ENABLE_CACHING=YES "COMPILATION_CACHE_CAS_PATH=$CAS" \
             COMPILATION_CACHE_LIMIT_SIZE=8G \
