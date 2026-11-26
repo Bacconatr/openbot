@@ -242,7 +242,24 @@
           "bundleIdentifier": "run.openbot.mobile.ExpoWidgetsTarget",
           "groupIdentifier": "group.run.openbot.mobile",
           "enablePushNotifications": true,
-          "frequentUpdates": true
+          "frequentUpdates": true,
+          "widgets": [
+            {
+              "name": "OpenBotAgents",
+              "displayName": "Agents",
+              "description": "See which agents are working and which need you.",
+              "ios": {
+                "supportedFamilies": [
+                  "systemSmall",
+                  "systemMedium",
+                  "systemLarge",
+                  "accessoryCircular",
+                  "accessoryRectangular",
+                  "accessoryInline"
+                ]
+              }
+            }
+          ]
         }
       ],
       [

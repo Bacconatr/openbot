@@ -117,7 +117,9 @@ export function liveActivityView(
     {
       avatar: shown ? input.avatar(presentation.serverId, shown, liveActivityMood(presentation)) : "",
       tapUrl:
-        allUnread.length > 1 || !shown ? LIVE_ACTIVITY_LIST_URL : openUrl(presentation.serverId, shown.id, threadId),
+        allUnread.length > 1 || !shown
+          ? LIVE_ACTIVITY_LIST_URL
+          : liveActivityOpenUrl(presentation.serverId, shown.id, threadId),
       buttons: buttons.map((button) => ({
         label: button.label,
         prominent: button.prominent,
@@ -127,7 +129,7 @@ export function liveActivityView(
         name: agent.name,
         count: agent.count,
         avatar: input.avatar(agent.serverId, agent, "responded"),
-        url: openUrl(agent.serverId, agent.id),
+        url: liveActivityOpenUrl(agent.serverId, agent.id),
       })),
       agentCount: allUnread.length,
     },
@@ -505,7 +507,7 @@ function isLiveActivityAction(value: unknown): value is LiveActivityAction {
   );
 }
 
-function openUrl(serverId: string, agentId: string, threadId: string | null = null): string {
+export function liveActivityOpenUrl(serverId: string, agentId: string, threadId: string | null = null): string {
   const params = new URLSearchParams({ server: serverId, agent: agentId });
   if (threadId) params.set(THREAD_PARAM, threadId);
   return `${LIVE_ACTIVITY_URL}?${params}`;
