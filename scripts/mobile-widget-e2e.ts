@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { isDynamicRecord } from "@openbot/contracts/runtime-values";
 import { createOpenBotLogger } from "@openbot/logging";
@@ -126,7 +127,8 @@ function timelineChecks(entries: TimelineEntry[], minRows: number): Check[] {
   const gap = later.timestamp - now.timestamp;
   const order = rows.map((row) => STATE_ORDER[row.state]);
   const countOf = (state: RowState) => rows.filter((row) => row.state === state).length;
-  const missingAvatars = rows.filter((row) => row.avatar && !existsSync(join(now.props.dir, row.avatar)));
+  const dir = now.props.dir.startsWith("file:") ? fileURLToPath(now.props.dir) : now.props.dir;
+  const missingAvatars = rows.filter((row) => row.avatar && !existsSync(join(dir, row.avatar)));
   const badLinks = rows.filter((row) => !OPEN_LINK.test(row.url));
   return [
     check("two timeline entries", entries.length === 2, `found ${entries.length}`),

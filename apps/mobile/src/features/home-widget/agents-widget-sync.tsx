@@ -8,7 +8,7 @@ import { useMobileWorkspaceActions, useMobileWorkspaceSelector } from "@/feature
 import { phoneSidebarPins } from "@/features/workspace/model/agent-pins";
 import { showsOnline } from "@/features/workspace/model/server-status";
 import type { MobileAgent, MobileServer } from "@/features/workspace/model/workspace-types";
-import { useText } from "@/shared/lib/text";
+import { currentText, type MobileText, useText } from "@/shared/lib/text";
 import { agentsWidget } from "./agents-widget";
 import type { AgentsWidgetNative, AgentsWidgetPlaceholder } from "./agents-widget.types";
 import { agentsWidgetProps } from "./model/agents-widget-props";
@@ -22,13 +22,21 @@ interface AgentsWidgetSyncProps {
 
 const PUBLISH_DELAY_MS = 1000;
 const STALE_AFTER_MS = 20 * 60 * 1000;
+const REFRESH_CHECK_MS = 60 * 1000;
+const MOODS: readonly AvatarMood[] = ["waiting", "working", "idle"];
+
+function placeholderOf({ t }: Pick<MobileText, "t">): AgentsWidgetPlaceholder {
+  return { summary: t("mobile.liveActivity.appName"), empty: t("mobile.liveActivity.stale.detail") };
+}
+
+export function resetAgentsWidget(): void {
+  const placeholder = placeholderOf(currentText());
+  agentsWidget(placeholder)?.clear(placeholder);
+}
 
 export function AgentsWidgetSync(props: AgentsWidgetSyncProps): ReactNode {
   const { t } = useText();
-  const placeholder = useMemo(
-    () => ({ summary: t("mobile.liveActivity.appName"), empty: t("mobile.liveActivity.stale.detail") }),
-    [t],
-  );
+  const placeholder = useMemo(() => placeholderOf({ t }), [t]);
   const native = useMemo(() => agentsWidget(placeholder), [placeholder]);
   return native ? <AgentsWidgetPublisher {...props} native={native} placeholder={placeholder} /> : null;
 }
@@ -48,6 +56,8 @@ function AgentsWidgetPublisher({
   const sidebarByServer = useMobileWorkspaceSelector((current) => current.sidebarByServer);
   const last = useRef({ key: "", at: 0 });
   const drawing = useRef(new Set<string>());
+  const failed = useRef(new Set<string>());
+  const rerun = useRef<() => void>(() => undefined);
 
   const placeholderRef = useRef(placeholder);
   placeholderRef.current = placeholder;
@@ -58,23 +68,28 @@ function AgentsWidgetPublisher({
     let timer: ReturnType<typeof setTimeout> | null = null;
     let stopped = false;
     const byKey = new Map(agents.map((agent) => [`${agent.serverId}:${agent.id}`, agent]));
+    let keep = new Set<string>();
     const avatar = (shown: WatchAgent): string => {
       const agent = byKey.get(`${shown.serverId}:${shown.id}`);
       if (!agent) return "";
+      const fileOf = (mood: AvatarMood) =>
+        native.avatarFile(agent.avatarSeed, agent.avatarHue, mood, agent.avatarColor);
+      for (const mood of MOODS) keep.add(fileOf(mood));
       const mood: AvatarMood = shown.state;
-      const file = native.avatarFile(agent.avatarSeed, agent.avatarHue, mood, agent.avatarColor);
+      const file = fileOf(mood);
       if (native.hasAvatar(file)) return file;
-      if (!drawing.current.has(file)) {
+      if (!drawing.current.has(file) && !failed.current.has(file)) {
         drawing.current.add(file);
         void native
           .drawAvatar(file, agent.avatarSeed, agent.avatarHue, mood, agent.avatarColor)
           .catch(() => false)
           .then((drawn) => {
             drawing.current.delete(file);
-            if (drawn) schedule();
+            if (drawn) rerun.current();
+            else failed.current.add(file);
           });
       }
-      return "";
+      return MOODS.map(fileOf).find((other) => native.hasAvatar(other)) ?? "";
     };
     const publish = () => {
       const snapshot = buildWatchSnapshot({
@@ -99,6 +114,7 @@ function AgentsWidgetPublisher({
         text,
         accent,
       });
+      keep = new Set();
       const now = Date.now();
       const time = new Date(now).toLocaleTimeString(text.locale, { hour: "numeric", minute: "2-digit" });
       const props = agentsWidgetProps(snapshot, avatar, native.dir, time);
@@ -106,7 +122,7 @@ function AgentsWidgetPublisher({
       const key = JSON.stringify({ ...props, updated: "" });
       if (key === last.current.key && now - last.current.at < STALE_AFTER_MS / 2) return;
       last.current = { key, at: now };
-      native.removeAvatars(new Set(props.rows.map((row) => row.avatar).filter(Boolean)));
+      native.removeAvatars(keep);
       native.publish({ at: now, props }, { at: now + STALE_AFTER_MS, props: { ...props, stale: true } });
     };
     const schedule = () => {
@@ -116,9 +132,10 @@ function AgentsWidgetPublisher({
         if (!stopped) publish();
       }, PUBLISH_DELAY_MS);
     };
+    rerun.current = schedule;
     schedule();
     const unsubscribe = liveState.subscribe(schedule);
-    const refresh = setInterval(schedule, STALE_AFTER_MS / 2);
+    const refresh = setInterval(schedule, REFRESH_CHECK_MS);
     return () => {
       stopped = true;
       unsubscribe();

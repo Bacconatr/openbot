@@ -17,12 +17,13 @@ import type { AvatarMood } from "@openbot/brand/bloub-avatar-motion";
 import type { AvatarColor, AvatarHue } from "@openbot/contracts/ipc";
 import { Directory, File } from "expo-file-system";
 import { createWidget, type WidgetEnvironment, widgetsDirectory } from "expo-widgets";
-import { renderPlushPicture } from "@/features/agents/model/plush/plush-picture";
+import { PLUSH_STYLE, renderPlushPicture } from "@/features/agents/model/plush/plush-picture";
 import type { AgentsWidgetNative, AgentsWidgetPlaceholder } from "./agents-widget.types";
 import type { AgentsWidgetProps, AgentsWidgetRow } from "./model/agents-widget-props";
 
 const AGENTS_WIDGET_NAME = "OpenBotAgents";
 const AVATAR_PREFIX = "agents-widget-";
+const AVATAR_STYLE = PLUSH_STYLE.replace(/[^A-Za-z0-9]/gu, "_");
 const AVATAR_PIXELS = 96;
 
 function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, environment: WidgetEnvironment) {
@@ -188,17 +189,29 @@ function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, e
 
 function removeAvatars(dir: string, keep: ReadonlySet<string>): void {
   if (!widgetsDirectory) return;
-  for (const entry of new Directory(dir).list()) {
-    if (entry instanceof File && entry.name.startsWith(AVATAR_PREFIX) && !keep.has(entry.name)) entry.delete();
+  try {
+    for (const entry of new Directory(dir).list()) {
+      if (entry instanceof File && entry.name.startsWith(AVATAR_PREFIX) && !keep.has(entry.name)) entry.delete();
+    }
+  } catch {}
+}
+
+function hasFile(dir: string, name: string): boolean {
+  try {
+    return Boolean(widgetsDirectory) && new File(dir, name).exists;
+  } catch {
+    return false;
   }
 }
 
 export function agentsWidgetNative(placeholder: AgentsWidgetPlaceholder): AgentsWidgetNative {
   const dir = widgetsDirectory ?? "";
   const widget = createWidget<Partial<AgentsWidgetProps>>(AGENTS_WIDGET_NAME, agentsWidgetLayout, placeholder);
+  let session = 0;
   return {
     dir,
     clear(next) {
+      session += 1;
       removeAvatars(dir, new Set());
       widget.updateTimeline([{ date: new Date(), props: next }]);
     },
@@ -209,14 +222,21 @@ export function agentsWidgetNative(placeholder: AgentsWidgetPlaceholder): Agents
       ]);
     },
     avatarFile(seed: string, hue: AvatarHue | null, mood: AvatarMood, color: AvatarColor | null) {
-      return `${AVATAR_PREFIX}${[seed, hue ?? "", mood, color ?? ""].join("-").replace(/[^A-Za-z0-9-]/gu, "_")}.png`;
+      const parts = [AVATAR_STYLE, seed, hue ?? "", mood, color ?? ""].join("-").replace(/[^A-Za-z0-9-]/gu, "_");
+      return `${AVATAR_PREFIX}${parts}.png`;
     },
-    hasAvatar: (name) => Boolean(widgetsDirectory) && new File(dir, name).exists,
+    hasAvatar: (name) => hasFile(dir, name),
     async drawAvatar(name, seed, hue, mood, color) {
       if (!widgetsDirectory) return false;
+      const started = session;
       const data = await renderPlushPicture({ seed, hue, color, mood, pixels: AVATAR_PIXELS, saturation: 1 });
-      new File(dir, name).writeSync(data, { encoding: "base64" });
-      return true;
+      if (started !== session) return false;
+      try {
+        new File(dir, name).writeSync(data, { encoding: "base64" });
+        return true;
+      } catch {
+        return false;
+      }
     },
     removeAvatars: (keep) => removeAvatars(dir, keep),
   };
