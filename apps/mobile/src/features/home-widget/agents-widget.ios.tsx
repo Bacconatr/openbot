@@ -3,10 +3,10 @@ import type { AgentsWidgetLoader, AgentsWidgetNative } from "./agents-widget.typ
 
 let native: AgentsWidgetNative | undefined;
 
-export const agentsWidget: AgentsWidgetLoader = () => {
+export const agentsWidget: AgentsWidgetLoader = (placeholder) => {
   if (native) return native;
   if (!requireOptionalNativeModule("ExpoWidgets")) return null;
   const module: typeof import("./agents-widget-native.ios") = require("./agents-widget-native.ios");
-  native = module.agentsWidgetNative();
+  native = module.agentsWidgetNative(placeholder);
   return native;
 };

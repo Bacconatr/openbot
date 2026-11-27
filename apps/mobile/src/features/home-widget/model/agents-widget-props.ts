@@ -13,7 +13,6 @@ export interface AgentsWidgetRow {
   url: string;
 }
 
-/** What the home screen and Lock Screen widget shows. The extension renders it without the app's catalogs. */
 export interface AgentsWidgetProps {
   dir: string;
   rows: AgentsWidgetRow[];

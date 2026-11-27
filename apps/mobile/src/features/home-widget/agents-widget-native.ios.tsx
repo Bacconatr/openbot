@@ -1,5 +1,6 @@
 import { HStack, Image, Link, Spacer, Text, VStack, ZStack } from "@expo/ui/swift-ui";
 import {
+  accessibilityElement,
   clipShape,
   containerBackground,
   font,
@@ -17,7 +18,7 @@ import type { AvatarColor, AvatarHue } from "@openbot/contracts/ipc";
 import { Directory, File } from "expo-file-system";
 import { createWidget, type WidgetEnvironment, widgetsDirectory } from "expo-widgets";
 import { renderPlushPicture } from "@/features/agents/model/plush/plush-picture";
-import type { AgentsWidgetNative } from "./agents-widget.types";
+import type { AgentsWidgetNative, AgentsWidgetPlaceholder } from "./agents-widget.types";
 import type { AgentsWidgetProps, AgentsWidgetRow } from "./model/agents-widget-props";
 
 const AGENTS_WIDGET_NAME = "OpenBotAgents";
@@ -26,7 +27,6 @@ const AVATAR_PIXELS = 96;
 
 function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, environment: WidgetEnvironment) {
   "widget";
-  // The extension runs this function without the app's module scope or catalogs.
   const props = published ?? {};
   const family = environment.widgetFamily;
   const circular = family === "accessoryCircular";
@@ -53,8 +53,8 @@ function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, e
   const loaded = props.rows !== undefined;
   const first = rows[0];
   const summaryState = (props.waiting ?? 0) > 0 ? "waiting" : (props.working ?? 0) > 0 ? "working" : "idle";
-  const summary = !loaded ? "OpenBot" : stale ? (props.updated ?? "") : (props.summary ?? "");
-  const empty = loaded ? (props.empty ?? "") : "Open OpenBot to show your agents.";
+  const summary = loaded && stale ? (props.updated ?? "") : (props.summary ?? "");
+  const empty = props.empty ?? "";
   const tapUrl = first && first.state === "waiting" ? first.url : (props.listUrl ?? "openbot://live-activity?list=1");
   const status = (row: AgentsWidgetRow) => (stale && row.state !== "idle" ? (props.updated ?? "") : row.status);
 
@@ -112,7 +112,7 @@ function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, e
   );
 
   const lockRow = (row: AgentsWidgetRow) => (
-    <HStack key={row.key} spacing={6}>
+    <HStack key={row.key} spacing={6} modifiers={[accessibilityElement("combine")]}>
       <Text modifiers={[font({ size: 13, weight: "semibold" }), lineLimit(1)]}>{row.name}</Text>
       <Spacer minLength={4} />
       <Text modifiers={[font({ size: 12 }), foregroundStyle(secondary), lineLimit(1), layoutPriority(1)]}>
@@ -122,7 +122,7 @@ function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, e
   );
 
   const compactRow = (row: AgentsWidgetRow) => (
-    <HStack key={row.key} spacing={7}>
+    <HStack key={row.key} spacing={7} modifiers={[accessibilityElement("combine")]}>
       {avatar(row, 22)}
       <VStack alignment="leading" spacing={0}>
         <Text modifiers={[font({ size: 13, weight: "semibold" }), foregroundStyle(primary), lineLimit(1)]}>
@@ -138,7 +138,7 @@ function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, e
 
   const fullRow = (row: AgentsWidgetRow) => (
     <Link key={row.key} destination={row.url}>
-      <HStack spacing={10}>
+      <HStack spacing={10} modifiers={[accessibilityElement("combine")]}>
         {avatar(row, large ? 32 : 28)}
         <VStack alignment="leading" spacing={1}>
           <Text modifiers={[font({ size: 14, weight: "semibold" }), foregroundStyle(primary), lineLimit(1)]}>
@@ -186,14 +186,21 @@ function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, e
   );
 }
 
-const widget = createWidget<Partial<AgentsWidgetProps>>(AGENTS_WIDGET_NAME, agentsWidgetLayout);
+function removeAvatars(dir: string, keep: ReadonlySet<string>): void {
+  if (!widgetsDirectory) return;
+  for (const entry of new Directory(dir).list()) {
+    if (entry instanceof File && entry.name.startsWith(AVATAR_PREFIX) && !keep.has(entry.name)) entry.delete();
+  }
+}
 
-export function agentsWidgetNative(): AgentsWidgetNative {
+export function agentsWidgetNative(placeholder: AgentsWidgetPlaceholder): AgentsWidgetNative {
   const dir = widgetsDirectory ?? "";
+  const widget = createWidget<Partial<AgentsWidgetProps>>(AGENTS_WIDGET_NAME, agentsWidgetLayout, placeholder);
   return {
     dir,
-    clear() {
-      widget.updateTimeline([{ date: new Date(), props: {} }]);
+    clear(next) {
+      removeAvatars(dir, new Set());
+      widget.updateTimeline([{ date: new Date(), props: next }]);
     },
     publish(now, later) {
       widget.updateTimeline([
@@ -211,11 +218,6 @@ export function agentsWidgetNative(): AgentsWidgetNative {
       new File(dir, name).writeSync(data, { encoding: "base64" });
       return true;
     },
-    removeAvatars(keep) {
-      if (!widgetsDirectory) return;
-      for (const entry of new Directory(dir).list()) {
-        if (entry instanceof File && entry.name.startsWith(AVATAR_PREFIX) && !keep.has(entry.name)) entry.delete();
-      }
-    },
+    removeAvatars: (keep) => removeAvatars(dir, keep),
   };
 }

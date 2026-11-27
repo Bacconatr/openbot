@@ -10,7 +10,7 @@ import { showsOnline } from "@/features/workspace/model/server-status";
 import type { MobileAgent, MobileServer } from "@/features/workspace/model/workspace-types";
 import { useText } from "@/shared/lib/text";
 import { agentsWidget } from "./agents-widget";
-import type { AgentsWidgetNative } from "./agents-widget.types";
+import type { AgentsWidgetNative, AgentsWidgetPlaceholder } from "./agents-widget.types";
 import { agentsWidgetProps } from "./model/agents-widget-props";
 
 interface AgentsWidgetSyncProps {
@@ -21,12 +21,16 @@ interface AgentsWidgetSyncProps {
 }
 
 const PUBLISH_DELAY_MS = 1000;
-/** After this long without a publish, the widget stops claiming that agents are working. */
 const STALE_AFTER_MS = 20 * 60 * 1000;
 
 export function AgentsWidgetSync(props: AgentsWidgetSyncProps): ReactNode {
-  const native = useMemo(() => agentsWidget(), []);
-  return native ? <AgentsWidgetPublisher {...props} native={native} /> : null;
+  const { t } = useText();
+  const placeholder = useMemo(
+    () => ({ summary: t("mobile.liveActivity.appName"), empty: t("mobile.liveActivity.stale.detail") }),
+    [t],
+  );
+  const native = useMemo(() => agentsWidget(placeholder), [placeholder]);
+  return native ? <AgentsWidgetPublisher {...props} native={native} placeholder={placeholder} /> : null;
 }
 
 function AgentsWidgetPublisher({
@@ -35,7 +39,8 @@ function AgentsWidgetPublisher({
   agents,
   preferences,
   native,
-}: AgentsWidgetSyncProps & { native: AgentsWidgetNative }): null {
+  placeholder,
+}: AgentsWidgetSyncProps & { native: AgentsWidgetNative; placeholder: AgentsWidgetPlaceholder }): null {
   const text = useText();
   const accent = String(useCSSVariable("--openbot-accent"));
   const actions = useMobileWorkspaceActions();
@@ -44,7 +49,9 @@ function AgentsWidgetPublisher({
   const last = useRef({ key: "", at: 0 });
   const drawing = useRef(new Set<string>());
 
-  useEffect(() => () => native.clear(), [native]);
+  const placeholderRef = useRef(placeholder);
+  placeholderRef.current = placeholder;
+  useEffect(() => () => native.clear(placeholderRef.current), [native]);
 
   useEffect(() => {
     if (!serversReady) return;
