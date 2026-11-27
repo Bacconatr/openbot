@@ -187,6 +187,7 @@ import {
   retainLocationAlwaysAllowed,
 } from "@/features/chat/model/location-always-allowed";
 import { deleteServerSideQuestions } from "@/features/chat/model/side-questions";
+import { AgentsWidgetSync } from "@/features/home-widget/agents-widget-sync";
 import { useLiveActivity } from "@/features/live-activity/use-live-activity";
 import { NotificationAvatarSync } from "@/features/push-notifications/notification-avatar-sync";
 import { usePushNotifications } from "@/features/push-notifications/use-push-notifications";
@@ -2889,6 +2890,12 @@ export function MobileWorkspaceProvider({ children }: PropsWithChildren) {
             preferences={visiblePreferences}
             capabilities={serverCapabilities.current}
             teamApi={teamApi}
+          />
+          <AgentsWidgetSync
+            servers={orderedServers}
+            serversReady={serverDirectoryState === "ready"}
+            agents={directoryAgents}
+            preferences={visiblePreferences}
           />
           <NotificationAvatarSync
             servers={servers}
