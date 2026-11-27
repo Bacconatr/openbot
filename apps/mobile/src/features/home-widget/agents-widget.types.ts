@@ -11,6 +11,8 @@ export interface AgentsWidgetNative {
   dir: string;
   /** Shows `now`, then `later` at its time, so an app that stops running does not leave "Working" up for hours. */
   publish(now: AgentsWidgetEntry, later: AgentsWidgetEntry): void;
+  /** Back to "Open OpenBot", so no agent names stay on the Lock Screen after sign-out. */
+  clear(): void;
   avatarFile(seed: string, hue: AvatarHue | null, mood: AvatarMood, color: AvatarColor | null): string;
   hasAvatar(file: string): boolean;
   drawAvatar(

@@ -44,7 +44,7 @@ function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, e
   const secondary = { type: "hierarchical", style: "secondary" } as const;
   const stale = props.stale === true;
   const tint = (state: AgentsWidgetRow["state"]) => {
-    if (mono || (stale && state === "working")) return state === "idle" ? secondary : primary;
+    if (mono || (stale && state !== "idle")) return state === "idle" ? secondary : primary;
     if (state === "waiting") return light ? "#C93400" : "#FF9F0A";
     if (state === "working") return light ? "#0A6CDB" : "#64B5FF";
     return secondary;
@@ -53,14 +53,10 @@ function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, e
   const loaded = props.rows !== undefined;
   const first = rows[0];
   const summaryState = (props.waiting ?? 0) > 0 ? "waiting" : (props.working ?? 0) > 0 ? "working" : "idle";
-  const summary = !loaded
-    ? "OpenBot"
-    : stale && summaryState !== "waiting"
-      ? (props.updated ?? "")
-      : (props.summary ?? "");
+  const summary = !loaded ? "OpenBot" : stale ? (props.updated ?? "") : (props.summary ?? "");
   const empty = loaded ? (props.empty ?? "") : "Open OpenBot to show your agents.";
   const tapUrl = first && first.state === "waiting" ? first.url : (props.listUrl ?? "openbot://live-activity?list=1");
-  const status = (row: AgentsWidgetRow) => (stale && row.state === "working" ? (props.updated ?? "") : row.status);
+  const status = (row: AgentsWidgetRow) => (stale && row.state !== "idle" ? (props.updated ?? "") : row.status);
 
   const avatar = (row: AgentsWidgetRow, size: number) =>
     row.avatar ? (
@@ -196,6 +192,9 @@ export function agentsWidgetNative(): AgentsWidgetNative {
   const dir = widgetsDirectory ?? "";
   return {
     dir,
+    clear() {
+      widget.updateTimeline([{ date: new Date(), props: {} }]);
+    },
     publish(now, later) {
       widget.updateTimeline([
         { date: new Date(now.at), props: now.props },

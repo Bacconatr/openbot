@@ -44,6 +44,8 @@ function AgentsWidgetPublisher({
   const last = useRef({ key: "", at: 0 });
   const drawing = useRef(new Set<string>());
 
+  useEffect(() => () => native.clear(), [native]);
+
   useEffect(() => {
     if (!serversReady) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
