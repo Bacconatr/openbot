@@ -9,6 +9,7 @@ import {
   lineLimit,
   privacySensitive,
   resizable,
+  widgetAccentedRenderingMode,
   widgetURL,
 } from "@expo/ui/swift-ui/modifiers";
 import type { AvatarMood } from "@openbot/brand/bloub-avatar-motion";
@@ -63,7 +64,10 @@ function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, e
 
   const avatar = (row: AgentsWidgetRow, size: number) =>
     row.avatar ? (
-      <Image uiImage={(props.dir ?? "") + row.avatar} modifiers={[resizable(), frame({ width: size, height: size })]} />
+      <Image
+        uiImage={(props.dir ?? "") + row.avatar}
+        modifiers={[resizable(), widgetAccentedRenderingMode("desaturated"), frame({ width: size, height: size })]}
+      />
     ) : (
       <Image
         systemName="person.crop.circle.fill"
@@ -111,9 +115,19 @@ function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, e
     </HStack>
   );
 
+  const lockRow = (row: AgentsWidgetRow) => (
+    <HStack key={row.key} spacing={6}>
+      <Text modifiers={[font({ size: 13, weight: "semibold" }), lineLimit(1)]}>{row.name}</Text>
+      <Spacer minLength={4} />
+      <Text modifiers={[font({ size: 12 }), foregroundStyle(secondary), lineLimit(1), layoutPriority(1)]}>
+        {status(row)}
+      </Text>
+    </HStack>
+  );
+
   const compactRow = (row: AgentsWidgetRow) => (
     <HStack key={row.key} spacing={7}>
-      {rectangular ? null : avatar(row, 22)}
+      {avatar(row, 22)}
       <VStack alignment="leading" spacing={0}>
         <Text modifiers={[font({ size: 13, weight: "semibold" }), foregroundStyle(primary), lineLimit(1)]}>
           {row.name}
@@ -166,7 +180,7 @@ function agentsWidgetLayout(published: Partial<AgentsWidgetProps> | undefined, e
       {header}
       {shown.length > 0 ? (
         <VStack alignment="leading" spacing={accessory ? 1 : small ? 6 : large ? 10 : 7}>
-          {shown.map((row) => (small || accessory ? compactRow(row) : fullRow(row)))}
+          {shown.map((row) => (rectangular ? lockRow(row) : small ? compactRow(row) : fullRow(row)))}
         </VStack>
       ) : (
         <Text modifiers={[font({ size: 12 }), foregroundStyle(secondary), lineLimit(3)]}>{empty}</Text>
